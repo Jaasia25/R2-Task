@@ -2,3 +2,7 @@ fish
 data
 yolov8m.pt
 yolov8s.pt
+penguin_dataset
+puffin_dataset
+misclassified_ground_truth
+misclassified_yolo
