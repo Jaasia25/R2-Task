@@ -27,7 +27,7 @@ Ensure you have Python 3.9+ and Git installed.
 ### 2. Clone the Repository
 
 ```bash
-git clone <repository_url>
+git clone https://github.com/Jaasia25/R2-Task.git
 cd underwater-fish-detection
 ```
 
@@ -55,7 +55,7 @@ pip install -r requirements.txt
 
 ### 4. Download Model Weights
 
-The required final fine-tuned model weights (`yolov8s.pt` or `yolov8m.pt`) should be placed in the project root directory.
+The required final fine-tuned model weights should be updated in config.yaml in the config directory.
 
 **Weights Location**: Check the `models/` directory for saved checkpoints from the iterative training process. If the final model weights are not in the root directory, they can be retrieved from the `models/` folder (e.g., `models/fish_yolov87/weights/best.pt`).
 
@@ -70,7 +70,7 @@ This server hosts the YOLOv8 model and the Grad-CAM logic, handling all heavy co
 ```bash
 # Run the FastAPI server with auto-reload for development
 # It will typically run on http://127.0.0.1:8000
-uvicorn app.api:app --reload
+uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 2. Run the Streamlit Frontend
