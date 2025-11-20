@@ -381,27 +381,75 @@ class yolo_heatmap:
             self.process(img_path, full_save_path)
 
     def run_from_array(self, img_np):
-    # Ensure directories exist
-        temp_dir = "uploads"
-        os.makedirs(temp_dir, exist_ok=True)
-        temp_path = os.path.join(temp_dir, "temp_input.jpg")
-        cv2.imwrite(temp_path, img_np)
+        """
+        Run GradCAM on an image array (HWC, RGB) entirely in memory.
 
-        save_dir = "heatmap_result"
-        os.makedirs(save_dir, exist_ok=True)
+        Args:
+            img_np: np.ndarray, shape (H,W,3), RGB, dtype uint8 or float32
 
-        # Run explainable AI
-        self(temp_path, save_dir)
+        Returns:
+            heatmap: np.ndarray, HWC, RGB, uint8
+        """
+        import torch
+        import numpy as np
+        import cv2
+        from PIL import Image
 
-        # 🔥 FIX: Auto-detect generated heatmap file
-        heatmap_files = [f for f in os.listdir(save_dir) if f.lower().endswith(".jpg")]
-        if not heatmap_files:
-            raise FileNotFoundError("No heatmap image generated in heatmap_result folder.")
+        # -----------------------------
+        # 1️⃣ Ensure input is float32 RGB scaled 0-1
+        # -----------------------------
+        if img_np.dtype == np.uint8:
+            img_float = img_np.astype(np.float32) / 255.0
+        else:
+            img_float = img_np.copy()
 
-        heatmap_path = os.path.join(save_dir, heatmap_files[0])
-        heatmap = cv2.imread(heatmap_path)
+        # -----------------------------
+        # 2️⃣ Convert to tensor
+        # -----------------------------
+        tensor = torch.from_numpy(np.transpose(img_float, (2, 0, 1))).unsqueeze(0).to(self.device)
 
-        return heatmap
+        # -----------------------------
+        # 3️⃣ Run GradCAM safely
+        # -----------------------------
+        try:
+            # GradCAM returns [N,H,W] or [N,1,H,W]
+            grayscale_cam = self.method(tensor, [self.target])
+            if isinstance(grayscale_cam, (int, float)):
+                raise RuntimeError(f"CAM target returned scalar ({grayscale_cam}) — invalid.")
+            if torch.is_tensor(grayscale_cam):
+                grayscale_cam = grayscale_cam.cpu().numpy()
+        except Exception as e:
+            print(f"⚠️ GradCAM failed: {e} — returning blank heatmap.")
+            return np.zeros_like(img_np, dtype=np.uint8)
+
+        cam = grayscale_cam[0, ...]  # pick first batch
+
+        # -----------------------------
+        # 4️⃣ Overlay CAM on original image
+        # -----------------------------
+        from pytorch_grad_cam.utils.image import show_cam_on_image, scale_cam_image
+        cam_image = show_cam_on_image(img_float, scale_cam_image(cam), use_rgb=True)
+
+        # -----------------------------
+        # 5️⃣ Optional: YOLO detection info (confidence)
+        # -----------------------------
+        try:
+            results = self.model(img_np)
+            if results and len(results[0].boxes) > 0:
+                max_conf = results[0].boxes.conf.max().item()
+                print(f"✅ Max Detection Confidence: {max_conf:.4f}")
+        except Exception as e:
+            print(f"⚠️ YOLO detection check failed: {e}")
+
+        # -----------------------------
+        # 6️⃣ Return as uint8 RGB
+        # -----------------------------
+        if cam_image.dtype != np.uint8:
+            cam_image = (cam_image * 255).astype(np.uint8)
+
+        return cam_image
+
+
 
 
 
@@ -426,22 +474,22 @@ def get_params():
 
 
 
-# if __name__ == '__main__':
-    # params = get_params()
-    # model_weight_path = params['weight']
+if __name__ == '__main__':
+    params = get_params()
+    model_weight_path = params['weight']
     
-    # # Check if the model file exists before proceeding
-    # if not os.path.exists(model_weight_path):
-    #     print(f"🚨 Error: Model weight file '{model_weight_path}' not found. Please verify the path.")
-    #     sys.exit(1)
+    # Check if the model file exists before proceeding
+    if not os.path.exists(model_weight_path):
+        print(f"🚨 Error: Model weight file '{model_weight_path}' not found. Please verify the path.")
+        sys.exit(1)
     
-    # # Your model path is now correctly loaded in params
-    # model = yolo_heatmap(**params)
+    # Your model path is now correctly loaded in params
+    model = yolo_heatmap(**params)
     
-    # image_path = 'explainable-ai/00000012_jpg.rf.05461a5f799e551c095311e92c4752a7.jpg'
-    # save_dir = 'result'
+    image_path = 'xai/IMG_2466_jpeg_jpg.rf.53886abb9947ec4e47405957b30fe314.jpg'
+    save_dir = 'result'
     
-    # if os.path.exists(image_path):
-    #     model(image_path, save_dir)
-    # else:
-    #     print(f"🚨 Warning: Input image path '{image_path}' not found. Please provide a valid path.")
+    if os.path.exists(image_path):
+        model(image_path, save_dir)
+    else:
+        print(f"🚨 Warning: Input image path '{image_path}' not found. Please provide a valid path.")

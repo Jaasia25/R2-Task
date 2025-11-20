@@ -19,14 +19,14 @@ def train_model():
     os.makedirs("models", exist_ok=True)
 
     # Load pretrained YOLOv8 model
-    model = YOLO("yolov8m.pt")
+    model = YOLO("yolov8s.pt")
 
     # Train model on GPU 0
     results = model.train(
         data="data/dataset.yaml",
         epochs=100,
         imgsz=768,
-        batch=16,
+        batch=32,
         patience=15,
         project="models",
         name="fish_yolov8",
