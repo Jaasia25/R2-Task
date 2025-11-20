@@ -11,8 +11,13 @@ import sys
 
 # ⬇️ Import your GradCAM class
 from xai.gradcam import yolo_heatmap, get_params
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from utils.utils import getUtils
+
 
 app = FastAPI()
+utils = getUtils()
+config = utils.load_yaml()
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,7 +30,7 @@ app.add_middleware(
 # ------------------------------------------------------
 # LOAD YOLO MODEL
 # ------------------------------------------------------
-YOLO_MODEL_PATH = "models/fish_yolov8/weights/best.pt"
+YOLO_MODEL_PATH = config['model_path']['MODEL']
 yolo_model = YOLO(YOLO_MODEL_PATH)
 
 # ------------------------------------------------------
@@ -37,7 +42,18 @@ gradcam_model = yolo_heatmap(**params)
 
 # 🔥 Utility: Numpy/BGR → base64
 def to_base64(img):
-    _, buffer = cv2.imencode(".jpg", img)
+    """Convert numpy image to base64 safely"""
+    if img is None or img.size == 0:
+        raise ValueError("❌ to_base64() received an empty image")
+
+    # If image is RGB, convert to BGR for OpenCV
+    if img.shape[-1] == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+    success, buffer = cv2.imencode(".jpg", img)
+    if not success:
+        raise ValueError("❌ Failed to encode image to JPG")
+
     return base64.b64encode(buffer).decode("utf-8")
 
 
@@ -85,15 +101,28 @@ async def detect_fish(file: UploadFile = File(...)):
     # ------------------------------------------------------
     # 2️⃣ EXPLAINABLE AI (GradCAM)
     # ------------------------------------------------------
-    heatmap = gradcam_model.run_from_array(img_np)  # Write this helper method below
+    heatmap = gradcam_model.run_from_array(img_np)
+
+    if heatmap is None:
+        return {"error": "GradCAM returned None — fix run_from_array()"}
 
     # ------------------------------------------------------
     # RETURN EVERYTHING AS JSON
     # ------------------------------------------------------
+    max_conf = None
+    pred_results = yolo_model.predict(img_np, conf=0.3)  # or use your existing pred
+    if pred_results and len(pred_results) > 0:
+        pred = pred_results[0]
+        if pred.boxes.conf.numel() > 0:
+            max_conf = float(pred.boxes.conf.max().item())
+
+    # Then return in JSON
     return {
         "total_fish": len(class_ids),
         "species_count": species_count,
         "annotated_image": to_base64(annotated_img),
         "heatmap_image": to_base64(heatmap),
-        "original_image": to_base64(img_np)
+        "original_image": to_base64(img_np),
+        "gradcam_score": max_conf
     }
+

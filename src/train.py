@@ -38,14 +38,7 @@ def train_model():
     )
 
     print("\nTraining Completed Successfully!")
-    print("Best model saved at: ../models/fish_yolov8/weights/best.pt")
 
 
 if __name__ == "__main__":
-
-    # print("Looking for dataset.yaml at:", os.path.abspath(
-    #     r"C:\Users\Admin\Downloads\Fish_Detection_System\data\dataset.yaml"))
-    # print("Exists?", os.path.exists(
-    #     r"C:\Users\Admin\Downloads\Fish_Detection_System\data\dataset.yaml"))
-
     train_model()

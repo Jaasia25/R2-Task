@@ -1,9 +1,16 @@
 import streamlit as st
 import requests
 import base64
+import os
+import sys
 from PIL import Image
 import io
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from utils.utils import getUtils
 
+
+utils = getUtils()
+config = utils.load_yaml()
 # ================================================================
 # 🔹 API CLIENT
 # ================================================================
@@ -76,21 +83,29 @@ class UIComponents:
     def show_original(col, uploaded):
         with col:
             st.markdown("### 📷 Original Image")
-            st.image(uploaded, use_column_width=True)
+            st.image(uploaded, use_container_width=True)
 
     @staticmethod
     def show_annotated(col, image):
         with col:
             st.markdown("### 🔍 YOLO Detection")
-            st.image(image, use_column_width=True)
+            st.image(image, use_container_width=True)
 
     @staticmethod
     def show_summary(data):
         st.markdown("### 📊 Detection Summary")
         st.markdown(f"#### Total Fish: **{data['total_fish']}**")
-        st.write("---")
+
+        # st.write("---")
         for sp, c in data["species_count"].items():
-            st.markdown(f"- **{sp}**: {c}")
+            st.markdown(f"##### - {sp}: {c}")
+
+        # Show GradCAM / max confidence if available
+        if "gradcam_score" in data and data["gradcam_score"] is not None:
+            st.markdown(f"##### GradCAM Max Confidence: **{data['gradcam_score']:.2f}**")
+
+        
+
 
 
 
@@ -147,7 +162,7 @@ class FishDetectionApp:
         heatmap_img = self.decode_image(data["heatmap_image"])
         with col3:
             st.markdown("### 🔥 Explainable AI")
-            st.image(heatmap_img, use_column_width=True)
+            st.image(heatmap_img, use_container_width=True)
 
         # --------------------------------------------
         # SUMMARY
@@ -162,5 +177,5 @@ class FishDetectionApp:
 # ================================================================
 if __name__ == "__main__":
     st.set_page_config(page_title="🐟 Fish Detection System", layout="wide")
-    app = FishDetectionApp(api_url="http://192.168.10.50:8000/detect")
+    app = FishDetectionApp(api_url= config['api_url']['API_URL'])
     app.run()
