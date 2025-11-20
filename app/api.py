@@ -8,9 +8,10 @@ import io
 import base64
 import os
 import sys
+import torch
 
 # ⬇️ Import your GradCAM class
-from xai.gradcam import yolo_heatmap, get_params
+from xai.gradcam import yolo_heatmap, getParams, letterbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from utils.utils import getUtils
 
@@ -36,7 +37,7 @@ yolo_model = YOLO(YOLO_MODEL_PATH)
 # ------------------------------------------------------
 # LOAD EXPLAINABLE AI MODEL
 # ------------------------------------------------------
-params = get_params()
+params = getParams(YOLO_MODEL_PATH).get_params()
 gradcam_model = yolo_heatmap(**params)
 
 
@@ -64,11 +65,35 @@ async def detect_fish(file: UploadFile = File(...)):
     contents = await file.read()
     image = Image.open(io.BytesIO(contents)).convert("RGB")
     img_np = np.array(image)
+    
+    # Store original dimensions
+    original_height, original_width = img_np.shape[:2]
 
     # ------------------------------------------------------
-    # 1️⃣ DETECTION
+    # PREPROCESS IMAGE SAME WAY AS GRADCAM
     # ------------------------------------------------------
-    results = yolo_model.predict(img_np, save=False, conf=0.30)
+    img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+    
+    # Apply letterboxing (same as GradCAM)
+    img_letterboxed, ratio, (top, bottom, left, right) = letterbox(
+        img_bgr,
+        new_shape=(640, 640),
+        auto=True
+    )
+    
+    # Convert to RGB and normalize for tensor
+    img_letterboxed_rgb = cv2.cvtColor(img_letterboxed, cv2.COLOR_BGR2RGB)
+    img_float = np.float32(img_letterboxed_rgb) / 255.0
+    
+    # Create tensor
+    tensor = torch.from_numpy(np.transpose(img_float, (2, 0, 1))).unsqueeze(0)
+    
+    # ------------------------------------------------------
+    # 1️⃣ DETECTION (using letterboxed image)
+    # ------------------------------------------------------
+    CONF_THRESHOLD = 0.2  # Same as GradCAM default
+    
+    results = yolo_model.predict(tensor, save=False, conf=CONF_THRESHOLD, iou=0.7)
     result = results[0]
 
     boxes = result.boxes
@@ -85,38 +110,51 @@ async def detect_fish(file: UploadFile = File(...)):
         species_count[label] = species_count.get(label, 0) + 1
 
     # ------------------------------------------------------
-    # CREATE YOLO ANNOTATED IMAGE
+    # CREATE ANNOTATED IMAGE (on letterboxed image)
     # ------------------------------------------------------
-    annotated_img = img_np.copy()
-    for box, cls_id, conf in zip(boxes.xyxy, class_ids, confidences):
-        x1, y1, x2, y2 = map(int, box.cpu().numpy())
-        label = f"{names[cls_id]} {conf:.2f}"
-
-        cv2.rectangle(annotated_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(
-            annotated_img, label, (x1, y1 - 10),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2
-        )
+    # Use result.plot with the ORIGINAL letterboxed BGR image (uint8, 0-255)
+    annotated_img_letterboxed = result.plot(
+        img=img_letterboxed.copy(),  # BGR uint8 image
+        conf=True,
+        line_width=2,
+        font_size=1.0,
+        labels=True,
+        boxes=True
+    )
+    
+    # Convert BGR to RGB
+    annotated_img_letterboxed = cv2.cvtColor(annotated_img_letterboxed, cv2.COLOR_BGR2RGB)
+    
+    # Remove letterbox padding to get back to original aspect ratio
+    annotated_img = annotated_img_letterboxed[
+        top:annotated_img_letterboxed.shape[0] - bottom,
+        left:annotated_img_letterboxed.shape[1] - right
+    ]
+    
+    # Resize back to original dimensions
+    annotated_img = cv2.resize(annotated_img, (original_width, original_height))
 
     # ------------------------------------------------------
-    # 2️⃣ EXPLAINABLE AI (GradCAM)
+    # 2️⃣ EXPLAINABLE AI (GradCAM) - using same preprocessing
     # ------------------------------------------------------
     heatmap = gradcam_model.run_from_array(img_np)
 
     if heatmap is None:
         return {"error": "GradCAM returned None — fix run_from_array()"}
 
+    # Resize heatmap to match original dimensions (for consistency)
+    heatmap = cv2.resize(heatmap, (original_width, original_height))
+
+    # ------------------------------------------------------
+    # GET MAX CONFIDENCE
+    # ------------------------------------------------------
+    max_conf = None
+    if boxes.conf.numel() > 0:
+        max_conf = float(boxes.conf.max().item())
+
     # ------------------------------------------------------
     # RETURN EVERYTHING AS JSON
     # ------------------------------------------------------
-    max_conf = None
-    pred_results = yolo_model.predict(img_np, conf=0.3)  # or use your existing pred
-    if pred_results and len(pred_results) > 0:
-        pred = pred_results[0]
-        if pred.boxes.conf.numel() > 0:
-            max_conf = float(pred.boxes.conf.max().item())
-
-    # Then return in JSON
     return {
         "total_fish": len(class_ids),
         "species_count": species_count,
@@ -125,4 +163,3 @@ async def detect_fish(file: UploadFile = File(...)):
         "original_image": to_base64(img_np),
         "gradcam_score": max_conf
     }
-

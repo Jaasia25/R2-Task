@@ -382,37 +382,38 @@ class yolo_heatmap:
 
     def run_from_array(self, img_np):
         """
-        Run GradCAM on an image array (HWC, RGB) entirely in memory.
-
+        Run GradCAM on an image array (HWC, RGB) with proper preprocessing.
+        
         Args:
             img_np: np.ndarray, shape (H,W,3), RGB, dtype uint8 or float32
-
+        
         Returns:
             heatmap: np.ndarray, HWC, RGB, uint8
         """
-        import torch
-        import numpy as np
-        import cv2
-        from PIL import Image
-
-        # -----------------------------
-        # 1️⃣ Ensure input is float32 RGB scaled 0-1
-        # -----------------------------
+        
+        # Convert RGB to BGR for letterbox (it expects BGR)
         if img_np.dtype == np.uint8:
-            img_float = img_np.astype(np.float32) / 255.0
+            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
         else:
-            img_float = img_np.copy()
-
-        # -----------------------------
-        # 2️⃣ Convert to tensor
-        # -----------------------------
+            img_bgr = (img_np * 255).astype(np.uint8)
+            img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_RGB2BGR)
+        
+        # Apply the SAME preprocessing as the standalone version
+        img, _, (top, bottom, left, right) = letterbox(
+            img_bgr, 
+            new_shape=(self.img_size, self.img_size), 
+            auto=True
+        )
+        
+        # Convert to RGB and normalize
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img_float = np.float32(img) / 255.0
+        
+        # Create tensor
         tensor = torch.from_numpy(np.transpose(img_float, (2, 0, 1))).unsqueeze(0).to(self.device)
-
-        # -----------------------------
-        # 3️⃣ Run GradCAM safely
-        # -----------------------------
+        
+        # Run GradCAM
         try:
-            # GradCAM returns [N,H,W] or [N,1,H,W]
             grayscale_cam = self.method(tensor, [self.target])
             if isinstance(grayscale_cam, (int, float)):
                 raise RuntimeError(f"CAM target returned scalar ({grayscale_cam}) — invalid.")
@@ -421,61 +422,82 @@ class yolo_heatmap:
         except Exception as e:
             print(f"⚠️ GradCAM failed: {e} — returning blank heatmap.")
             return np.zeros_like(img_np, dtype=np.uint8)
-
-        cam = grayscale_cam[0, ...]  # pick first batch
-
-        # -----------------------------
-        # 4️⃣ Overlay CAM on original image
-        # -----------------------------
+        
+        cam = grayscale_cam[0, ...]
+        
+        # Overlay CAM on image
         from pytorch_grad_cam.utils.image import show_cam_on_image, scale_cam_image
         cam_image = show_cam_on_image(img_float, scale_cam_image(cam), use_rgb=True)
-
-        # -----------------------------
-        # 5️⃣ Optional: YOLO detection info (confidence)
-        # -----------------------------
-        try:
-            results = self.model(img_np)
-            if results and len(results[0].boxes) > 0:
-                max_conf = results[0].boxes.conf.max().item()
+        
+        # Get predictions using the CORRECT model
+        pred_results = self.model_yolo.predict(tensor, conf=self.conf_threshold, iou=0.7)
+        if pred_results and len(pred_results) > 0:
+            pred = pred_results[0]
+            
+            if pred.boxes.conf.numel() > 0:
+                max_conf = pred.boxes.conf.max().item()
                 print(f"✅ Max Detection Confidence: {max_conf:.4f}")
-        except Exception as e:
-            print(f"⚠️ YOLO detection check failed: {e}")
-
-        # -----------------------------
-        # 6️⃣ Return as uint8 RGB
-        # -----------------------------
+                
+                # Optional: renormalize CAM
+                if self.renormalize and self.task in ['detect', 'segment', 'pose']:
+                    if pred.boxes.xyxy.numel() > 0:
+                        cam_image = self.renormalize_cam_in_bounding_boxes(
+                            pred.boxes.xyxy.cpu().detach().numpy().astype(np.int32),
+                            img_float,
+                            cam
+                        )
+                
+                # Draw detections
+                if self.show_result:
+                    cam_image = pred.plot(
+                        img=cam_image * 255,
+                        conf=True,
+                        labels=True
+                    )
+                    cam_image = cv2.cvtColor(cam_image.astype(np.uint8), cv2.COLOR_BGR2RGB)
+            else:
+                print("⚠️ No detections found above threshold.")
+                cam_image = (cam_image * 255).astype(np.uint8)
+        
+        # Remove letterbox padding to return to original aspect ratio
+        cam_image = cam_image[top:cam_image.shape[0] - bottom, left:cam_image.shape[1] - right]
+        
+        # Ensure uint8
         if cam_image.dtype != np.uint8:
             cam_image = (cam_image * 255).astype(np.uint8)
-
+        
         return cam_image
 
 
 
 
-
+class getParams:
+    def __init__(self, model_path):
+        self.model_path = model_path
         
-def get_params():
-    params = {
-        # --- MODIFICATION HERE ---
-        'weight': MODEL_PATH, # Updated to your specific model path
-        # -------------------------
-        'device': 'cuda:0' if torch.cuda.is_available() else 'cpu', 
-        'method': 'GradCAMPlusPlus', # GradCAMPlusPlus, GradCAM, XGradCAM, EigenCAM, HiResCAM, LayerCAM, RandomCAM, EigenGradCAM, KPCA_CAM
-        'layer': [10, 12, 14, 16, 18],
-        'backward_type': 'all', 
-        'conf_threshold': 0.2, 
-        'ratio': 0.02, 
-        'show_result': True, 
-        'renormalize': False, 
-        'task':'detect', 
-        'img_size':640, 
-    }
-    return params
+    def get_params(self):
+        params = {
+            # --- MODIFICATION HERE ---
+            'weight': self.model_path, # Updated to your specific model path
+            # -------------------------
+            'device': 'cuda:0' if torch.cuda.is_available() else 'cpu', 
+            'method': 'EigenGradCAM', # GradCAMPlusPlus, GradCAM, XGradCAM, EigenCAM, HiResCAM, LayerCAM, RandomCAM, EigenGradCAM, KPCA_CAM
+            'layer': [10, 12, 14, 16, 18],
+            'backward_type': 'all', 
+            'conf_threshold': 0.2, 
+            'ratio': 0.02, 
+            'show_result': True, 
+            'renormalize': False, 
+            'task':'detect', 
+            'img_size':640, 
+        }
+        return params
 
 
 
 if __name__ == '__main__':
-    params = get_params()
+    p = getParams(model_path=MODEL_PATH)
+    params = p.get_params()
     model_weight_path = params['weight']
     
     # Check if the model file exists before proceeding
@@ -486,7 +508,7 @@ if __name__ == '__main__':
     # Your model path is now correctly loaded in params
     model = yolo_heatmap(**params)
     
-    image_path = 'xai/IMG_2466_jpeg_jpg.rf.53886abb9947ec4e47405957b30fe314.jpg'
+    image_path = 'xai/00000052_jpg.rf.1ecb9a121e316929ecdcc652b2de889d.jpg'
     save_dir = 'result'
     
     if os.path.exists(image_path):
