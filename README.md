@@ -4,6 +4,10 @@ This project implements a complete, end-to-end computer vision pipeline for auto
 
 The system utilizes the state-of-the-art YOLOv8 architecture for robust object detection, incorporates Grad-CAM for Explainable AI (XAI) insights, and is deployed via a modern, scalable web stack consisting of a Streamlit frontend and a dedicated FastAPI backend.
 
+## 📋 Documentation
+
+**Comprehensive project documentation is available in the `documentation/` folder, including detailed technical specifications, implementation details, and performance analysis.**
+
 ## ✨ Features
 
 - **Automated Species Detection**: Detects and classifies seven different underwater species (including various fish, sharks, penguins, puffins, jellyfish, starfish, and stingrays) using a fine-tuned YOLOv8 model.
