@@ -3,3 +3,5 @@ opencv-python
 albumentations
 ultralytics
 streamlit
+scikit-learn
+grad-cam==1.4.8
