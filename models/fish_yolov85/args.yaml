@@ -13,7 +13,7 @@ cache: false
 device: '0'
 workers: 8
 project: models
-name: fish_yolov85
+name: fish_yolov86
 exist_ok: false
 pretrained: true
 optimizer: Adam
@@ -103,4 +103,4 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: botsort.yaml
-save_dir: /workspace/Jaasia/Fish_Detection/models/fish_yolov85
+save_dir: /workspace/Jaasia/Fish_Detection/models/fish_yolov86

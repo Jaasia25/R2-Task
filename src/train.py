@@ -19,14 +19,14 @@ def train_model():
     os.makedirs("models", exist_ok=True)
 
     # Load pretrained YOLOv8 model
-    model = YOLO("yolov8m.pt")
+    model = YOLO("yolov8s.pt")
 
     # Train model on GPU 0
     results = model.train(
         data="data/dataset.yaml",
         epochs=100,
         imgsz=768,
-        batch=16,
+        batch=32,
         patience=15,
         project="models",
         name="fish_yolov8",
@@ -38,14 +38,7 @@ def train_model():
     )
 
     print("\nTraining Completed Successfully!")
-    print("Best model saved at: ../models/fish_yolov8/weights/best.pt")
 
 
 if __name__ == "__main__":
-
-    # print("Looking for dataset.yaml at:", os.path.abspath(
-    #     r"C:\Users\Admin\Downloads\Fish_Detection_System\data\dataset.yaml"))
-    # print("Exists?", os.path.exists(
-    #     r"C:\Users\Admin\Downloads\Fish_Detection_System\data\dataset.yaml"))
-
     train_model()
